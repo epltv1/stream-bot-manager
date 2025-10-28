@@ -1,0 +1,12 @@
+[Unit]
+Description=Stream Server
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/stream-bot-manager
+ExecStart=/root/stream-bot-manager/venv/bin/python /root/stream-bot-manager/server.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
