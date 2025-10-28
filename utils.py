@@ -4,24 +4,22 @@ import re
 import redis
 import requests
 from urllib.parse import urljoin
-from config import REDIS_URL
+from config import REDIS_URL, SEGMENT_DIR
 
+# Redis
 r = redis.from_url(REDIS_URL)
-SEGMENT_DIR = "/tmp/stream_segments"  # Will store .ts files
 os.makedirs(SEGMENT_DIR, exist_ok=True)
 
 def slugify(title):
     return re.sub(r'[^a-zA-Z0-9]+', '', title.lower())[:20] or 'stream'
 
 def store_stream(stream_id, m3u8_url, title):
-    start_time = time.time()
     pipe = r.pipeline()
     pipe.hset(f'stream:{stream_id}', mapping={
         'url': m3u8_url,
         'title': title,
-        'start_time': start_time,
-        'active': 'True',
-        'sequence': 0
+        'start_time': time.time(),
+        'active': 'True'
     })
     pipe.expire(f'stream:{stream_id}', 86400 * 7)
     pipe.execute()
@@ -47,12 +45,10 @@ def get_active_streams():
             })
     return sorted(streams, key=lambda x: x['title'])
 
-def fetch_and_cache_segment(stream_id, segment_url, segment_name):
-    """Download .ts and save to disk"""
+def fetch_segment(stream_id, segment_url, segment_name):
     path = os.path.join(SEGMENT_DIR, f"{stream_id}_{segment_name}")
     if os.path.exists(path):
         return path
-
     try:
         resp = requests.get(segment_url, timeout=15)
         resp.raise_for_status()
@@ -61,3 +57,15 @@ def fetch_and_cache_segment(stream_id, segment_url, segment_name):
         return path
     except:
         return None
+
+# Auto-clean old segments
+import threading
+def cleanup():
+    while True:
+        time.sleep(300)
+        now = time.time()
+        for f in os.listdir(SEGMENT_DIR):
+            p = os.path.join(SEGMENT_DIR, f)
+            if os.path.isfile(p) and os.path.getmtime(p) < now - 3600:
+                os.remove(p)
+threading.Thread(target=cleanup, daemon=True).start()
