@@ -19,35 +19,53 @@
     <div id="player"></div>
     <div id="viewers" class="viewers">Viewers: <span id="count">0</span></div>
 
-    <!-- Clappr + Plugins via CDN -->
     <script src="https://cdn.jsdelivr.net/npm/clappr@latest/dist/clappr.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/level-selector@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/clappr-pip-plugin@latest"></script>
 
     <script>
-        new Clappr.Player({
+        const player = new Clappr.Player({
             parentId: "#player",
             source: "{{ source }}",
             autoPlay: true,
             width: '100%', height: '100%',
+            mute: false,
             plugins: [LevelSelector, ClapprPipPlugin],
             levelSelectorConfig: { title: 'Quality', labels: { 'auto': 'Auto' } },
-            pipConfig: { enabled: true }
+            pipConfig: { enabled: true },
+            hlsjsConfig: {
+                xhrSetup: function(xhr, url) {
+                    xhr.withCredentials = false;
+                }
+            }
         });
 
         const countEl = document.getElementById('count');
+        let reported = false;
 
-        function report(action) {
-            fetch(`/viewers/{{ stream_id }}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action })
-            }).catch(() => {});
-        }
-        report('inc');
-        window.addEventListener('beforeunload', () => report('dec'));
+        // Report viewer only AFTER player starts
+        player.on('playbackready', () => {
+            if (!reported) {
+                fetch(`/viewers/{{ stream_id }}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'inc' })
+                });
+                reported = true;
+            }
+        });
 
-        // Update viewers every second
+        // Decrement on leave
+        window.addEventListener('beforeunload', () => {
+            if (reported) {
+                fetch(`/viewers/{{ stream_id }}`, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'dec' })
+                });
+            }
+        });
+
+        // Update count every 1s
         setInterval(() => {
             fetch(`/viewers/{{ stream_id }}?t=${Date.now()}`)
                 .then(r => r.json())
