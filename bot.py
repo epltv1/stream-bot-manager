@@ -1,10 +1,14 @@
 import logging
 import io
+import redis  # ← ADDED THIS LINE
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from config import TELEGRAM_TOKEN, EMBED_BASE_URL
+from config import TELEGRAM_TOKEN, EMBED_BASE_URL, REDIS_URL  # ← Import REDIS_URL
 from utils import slugify, store_stream, remove_stream, get_active_streams, get_screenshot
 import re
+
+# Connect to Redis
+r = redis.from_url(REDIS_URL)  # ← ADD THIS LINE
 
 logging.basicConfig(level=logging.INFO)
 
@@ -97,7 +101,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data.startswith('stop:'):
         stream_id = query.data.split(':')[1]
         data = r.hgetall(f'stream:{stream_id}')
-        if data:
+        if data and data.get(b'active') == b'True':
             title = data[b'title'].decode()
             remove_stream(stream_id)
             await query.edit_message_caption(
@@ -105,7 +109,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
         else:
-            await query.edit_message_caption(caption="Stream already removed.")
+            await query.edit_message_caption(caption="Stream already removed or not found.")
 
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
