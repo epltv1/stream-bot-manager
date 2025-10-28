@@ -2,41 +2,52 @@ import requests
 import ffmpeg
 import io
 import time
-import uuid
+import re
 import redis
 from config import REDIS_URL, EMBED_BASE_URL
 from urllib.parse import urlparse
 
 r = redis.from_url(REDIS_URL)
 
-def generate_id():
-    return str(uuid.uuid4().hex[:8])
+def slugify(title):
+    """Convert title to safe URL ID (max 20 chars, alphanumeric only)"""
+    slug = re.sub(r'[^a-zA-Z0-9]+', '', title.lower())
+    return slug[:20] or 'stream'
 
 def store_stream(stream_id, m3u8_url, title):
+    """Store stream in Redis with title and start time"""
     start_time = time.time()
     pipe = r.pipeline()
     pipe.hset(f'stream:{stream_id}', mapping={
         'url': m3u8_url,
         'title': title,
         'start_time': start_time,
-        'viewers': 0,
         'active': 'True'
     })
-    pipe.expire(f'stream:{stream_id}', 86400 * 7)
+    pipe.expire(f'stream:{stream_id}', 86400 * 7)  # Auto-delete after 7 days
     pipe.execute()
 
 def remove_stream(stream_id):
-    r.hset(f'stream:{stream_id}', 'active', 'False')
-    r.expire(f'stream:{stream_id}', 60)
+    """Stop stream and mark for deletion"""
+    if r.exists(f'stream:{stream_id}'):
+        r.hset(f'stream:{stream_id}', 'active', 'False')
+        r.expire(f'stream:{stream_id}', 60)  # Delete in 1 min
+        return True
+    return False
 
 def get_uptime(start_time):
+    """Human-readable uptime: 5s, 2m 30s, 1h 15m, 3d"""
     delta = time.time() - float(start_time)
-    if delta < 60: return f"{int(delta)}s"
-    if delta < 3600: return f"{int(delta//60)}m {int(delta%60)}s"
-    if delta < 86400: return f"{int(delta//3600)}h {int(delta%3600//60)}m"
+    if delta < 60:
+        return f"{int(delta)}s"
+    if delta < 3600:
+        return f"{int(delta//60)}m {int(delta%60)}s"
+    if delta < 86400:
+        return f"{int(delta//3600)}h {int(delta%3600//60)}m"
     return f"{int(delta//86400)}d"
 
 def get_active_streams():
+    """Return list of all active streams"""
     streams = []
     for key in r.keys('stream:*'):
         data = r.hgetall(key)
@@ -46,49 +57,40 @@ def get_active_streams():
                 'id': sid,
                 'title': data[b'title'].decode(),
                 'uptime': get_uptime(data[b'start_time']),
-                'viewers': int(data[b'viewers']),
                 'url': data[b'url'].decode()
             })
-    return sorted(streams, key=lambda x: x['viewers'], reverse=True)
+    return sorted(streams, key=lambda x: x['title'])
 
 def needs_proxy(m3u8_url):
+    """Detect if stream needs proxy (CORS, domain lock, etc.)"""
     try:
         resp = requests.head(m3u8_url, timeout=8, allow_redirects=True)
         if resp.status_code >= 400:
             return True
-        origin = resp.headers.get('Access-Control-Allow-Origin', '')
-        if origin and origin != '*':
+        # Check CORS
+        cors = resp.headers.get('Access-Control-Allow-Origin', '')
+        if cors and cors != '*':
             return True
+        # Optional: Add domain-specific checks
     except:
         return True
     return False
 
 def get_proxy_url(m3u8_url, stream_id):
-    return f"{EMBED_BASE_URL}/proxy/{stream_id}" if needs_proxy(m3u8_url) else m3u8_url
-
-def health_check(m3u8_url):
-    try:
-        resp = requests.get(m3u8_url, timeout=10)
-        if '#EXTM3U' not in resp.text:
-            return False
-        for line in resp.text.split('\n'):
-            if line.endswith('.ts'):
-                ts_url = line if line.startswith('http') else m3u8_url.rsplit('/', 1)[0] + '/' + line
-                if requests.head(ts_url, timeout=5).status_code == 200:
-                    return True
-        return False
-    except:
-        return False
+    """Return proxied URL if needed, else original"""
+    return f"{EMBED_BASE_URL}/{stream_id}.m3u8" if needs_proxy(m3u8_url) else m3u8_url
 
 def get_screenshot(m3u8_url):
+    """Capture 1 frame from stream (returns BytesIO or None)"""
     try:
         process = (
             ffmpeg
             .input(m3u8_url, ss=1, t=1)
             .filter('scale', 640, -1)
             .output('pipe:', vframes=1, format='image2', vcodec='mjpeg')
-            .run(capture_stdout=True, capture_stderr=True)
+            .run(capture_stdout=True, capture_stderr=True, timeout=15)
         )
         return io.BytesIO(process[0])
-    except:
+    except Exception as e:
+        print(f"Screenshot failed: {e}")
         return None
