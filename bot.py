@@ -2,17 +2,20 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from config import TELEGRAM_TOKEN, EMBED_BASE_URL
-from utils import generate_id, store_stream, remove_stream, get_active_streams, get_screenshot, get_proxy_url
-import asyncio
+from utils import store_stream, remove_stream, get_active_streams, get_screenshot
+import re
 
 logging.basicConfig(level=logging.INFO)
 
+def slugify(title):
+    return re.sub(r'[^a-zA-Z0-9]+', '', title.lower())[:20] or 'stream'
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Stream Manager Bot\n\n"
-        "Use:\n"
+        "m3u8 Link Generator\n\n"
         "/stream <m3u8_url> <title>\n"
-        "/live → See all live streams"
+        "/live → See all links\n"
+        "/stop <title> → Remove stream"
     )
 
 async def stream(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -22,19 +25,22 @@ async def stream(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     m3u8_url = context.args[0]
     title = " ".join(context.args[1:])
-    stream_id = generate_id()
+    stream_id = slugify(title)
+
+    # Prevent duplicates
+    for s in get_active_streams():
+        if s['id'] == stream_id:
+            await update.message.reply_text(f"Title '{title}' already exists! Choose another.")
+            return
 
     store_stream(stream_id, m3u8_url, title)
 
-    embed_url = f"{EMBED_BASE_URL}/embed/{stream_id}"
-    proxy_used = "Yes" if get_proxy_url(m3u8_url, stream_id) != m3u8_url else "No"
+    m3u8_link = f"{EMBED_BASE_URL}/{stream_id}.m3u8"
 
     await update.message.reply_text(
-        f"Stream Started!\n\n"
+        f"m3u8 Link Ready!\n\n"
         f"Title: {title}\n"
-        f"ID: `{stream_id}`\n"
-        f"Embed: {embed_url}\n"
-        f"Proxy: {proxy_used}\n\n"
+        f"Link: `{m3u8_link}`\n\n"
         f"Use /live to manage",
         parse_mode='Markdown'
     )
@@ -42,48 +48,50 @@ async def stream(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def live(update: Update, context: ContextTypes.DEFAULT_TYPE):
     streams = get_active_streams()
     if not streams:
-        await update.message.reply_text("No live streams.")
+        await update.message.reply_text("No active streams.")
         return
 
     for s in streams:
         photo = get_screenshot(s['url'])
         caption = (
             f"<b>{s['title']}</b>\n"
-            f"Uptime: {s['uptime']}\n"
-            f"Viewers: {s['viewers']}\n"
-            f"ID: <code>{s['id']}</code>"
+            f"Link: <code>{EMBED_BASE_URL}/{s['id']}.m3u8</code>\n"
+            f"Uptime: {s['uptime']}"
         )
         keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("Stop", callback_data=f"stop:{s['id']}"),
-                InlineKeyboardButton("Embed", url=f"{EMBED_BASE_URL}/embed/{s['id']}")
-            ]
+            [InlineKeyboardButton("Stop", callback_data=f"stop:{s['id']}")]
         ])
 
         if photo:
-            await update.message.reply_photo(
-                photo=photo, caption=caption, reply_markup=keyboard, parse_mode='HTML'
-            )
+            await update.message.reply_photo(photo=photo, caption=caption, reply_markup=keyboard, parse_mode='HTML')
         else:
             await update.message.reply_text(caption, reply_markup=keyboard, parse_mode='HTML')
+
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /stop <title>")
+        return
+    title = " ".join(context.args)
+    stream_id = slugify(title)
+    if remove_stream(stream_id):
+        await update.message.reply_text(f"Stream '{title}' stopped.")
+    else:
+        await update.message.reply_text(f"Stream not found.")
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     if query.data.startswith('stop:'):
         stream_id = query.data.split(':')[1]
         remove_stream(stream_id)
-        await query.edit_message_caption(
-            caption="Stream Stopped.\nEmbed link no longer works.",
-            parse_mode='HTML'
-        )
+        await query.edit_message_caption(caption="Stream stopped.")
 
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stream", stream))
     app.add_handler(CommandHandler("live", live))
+    app.add_handler(CommandHandler("stop", stop))
     app.add_handler(CallbackQueryHandler(button))
     app.run_polling()
 
