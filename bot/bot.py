@@ -2,7 +2,7 @@ import logging, io, requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler,  CallbackQueryHandler, ContextTypes
 
-TOKEN = 'YOUR_BOT_TOKEN_HERE'          # <<<--- REPLACE
+TOKEN = '7454188408:AAHwLwIoxdoRRbdlO33IqnrniX3RizgxnkA'          # <<<--- REPLACE
 SERVER_URL = 'http://45.33.127.60'
 logging.basicConfig(level=logging.INFO)
 
