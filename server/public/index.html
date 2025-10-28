@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Live Stream</title>
+  <script src="/clappr/clappr.min.js"></script>
+  <script src="/clappr/clappr.pip.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#000;overflow:hidden;font-family:Arial}
+    #player{width:100vw;height:100vh}
+    .overlay{position:absolute;top:15px;padding:8px 12px;border-radius:20px;font-weight:bold;font-size:14px}
+    .live{left:15px;background:linear-gradient(45deg,#ff0000,#ff4444);color:#fff}
+    .offline{left:15px;background:#666;color:#ccc}
+    .viewers{right:15px;background:rgba(0,0,0,.7);color:#fff}
+  </style>
+</head>
+<body>
+  <div id="player"></div>
+  <div id="live-icon" class="overlay live">● LIVE</div>
+  <div id="viewers" class="overlay viewers">0</div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const id = location.pathname.split('/')[2];
+    const socket = io();
+    socket.emit('joinStream', id);
+    fetch(`/api/stream/${id}`).then(r=>r.json()).then(s=>{
+      new Clappr.Player({source:s.proxyUrl,parentId:'#player',autoPlay:true,plugins:{core:[Clappr.PIP]}});
+      setInterval(async()=>{
+        try{await fetch(s.proxyUrl,{method:'HEAD'});document.getElementById('live-icon').textContent='● LIVE';document.getElementById('live-icon').className='overlay live';}
+        catch{document.getElementById('live-icon').textContent='⚠ OFFLINE';document.getElementById('live-icon').className='overlay offline';}
+      },10000);
+      socket.on('viewersUpdate',v=>document.getElementById('viewers').textContent=`👁 ${v}`);
+      setInterval(()=>socket.emit('heartbeat',id),25000);
+    }).catch(()=>location.reload());
+  </script>
+</body>
+    </html>
