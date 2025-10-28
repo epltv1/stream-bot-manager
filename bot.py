@@ -2,20 +2,17 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from config import TELEGRAM_TOKEN, EMBED_BASE_URL
-from utils import store_stream, remove_stream, get_active_streams, get_screenshot
+from utils import slugify, store_stream, remove_stream, get_active_streams, get_screenshot
 import re
 
 logging.basicConfig(level=logging.INFO)
 
-def slugify(title):
-    return re.sub(r'[^a-zA-Z0-9]+', '', title.lower())[:20] or 'stream'
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "m3u8 Link Generator\n\n"
+        "m3u8 Proxy Bot\n\n"
         "/stream <m3u8_url> <title>\n"
         "/live → See all links\n"
-        "/stop <title> → Remove stream"
+        "/stop <title> → Remove"
     )
 
 async def stream(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -27,18 +24,16 @@ async def stream(update: Update, context: ContextTypes.DEFAULT_TYPE):
     title = " ".join(context.args[1:])
     stream_id = slugify(title)
 
-    # Prevent duplicates
     for s in get_active_streams():
         if s['id'] == stream_id:
-            await update.message.reply_text(f"Title '{title}' already exists! Choose another.")
+            await update.message.reply_text(f"Title '{title}' already in use!")
             return
 
     store_stream(stream_id, m3u8_url, title)
-
     m3u8_link = f"{EMBED_BASE_URL}/{stream_id}.m3u8"
 
     await update.message.reply_text(
-        f"m3u8 Link Ready!\n\n"
+        f"Proxy Link Ready!\n\n"
         f"Title: {title}\n"
         f"Link: `{m3u8_link}`\n\n"
         f"Use /live to manage",
@@ -74,9 +69,9 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     title = " ".join(context.args)
     stream_id = slugify(title)
     if remove_stream(stream_id):
-        await update.message.reply_text(f"Stream '{title}' stopped.")
+        await update.message.reply_text(f"Stopped: {title}")
     else:
-        await update.message.reply_text(f"Stream not found.")
+        await update.message.reply_text("Stream not found.")
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
