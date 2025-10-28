@@ -1,0 +1,13 @@
+[Unit]
+Description=Stream Bot
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/stream-bot-manager
+Environment=TELEGRAM_TOKEN=YOUR_TOKEN_HERE
+ExecStart=/root/stream-bot-manager/venv/bin/python /root/stream-bot-manager/bot.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
